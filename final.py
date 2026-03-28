@@ -1,25 +1,57 @@
+import sys
+import subprocess
+import importlib
+import os
+import random
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
-import random
-import os
 
-# =========================
-# IMAGE SUPPORT
-# =========================
-try:
-    from PIL import Image, ImageTk, ImageSequence
-    PIL_AVAILABLE = True
-except ImportError:
-    PIL_AVAILABLE = False
 
-# =========================
-# SOUND SUPPORT
-# =========================
-try:
-    import pygame
-    PYGAME_AVAILABLE = True
-except ImportError:
-    PYGAME_AVAILABLE = False
+# ==========================================
+# AUTO-INSTALL REQUIRED PACKAGES
+# ==========================================
+def install_and_import(package_name, import_name=None):
+    if import_name is None:
+        import_name = package_name
+
+    try:
+        importlib.import_module(import_name)
+        print(f"{package_name} is already installed.")
+        return True
+    except ImportError:
+        print(f"{package_name} is not installed. Installing now...")
+
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
+            print(f"{package_name} installed successfully.")
+            return True
+        except Exception as error:
+            print(f"Failed to install {package_name}: {error}")
+            return False
+
+
+pillow_ok = install_and_import("pillow", "PIL")
+pygame_ok = install_and_import("pygame")
+
+if not pillow_ok:
+    messagebox.showerror(
+        "Missing Package",
+        "Pillow could not be installed automatically.\n"
+        "Please run: pip install pillow"
+    )
+    raise SystemExit
+
+if not pygame_ok:
+    messagebox.showerror(
+        "Missing Package",
+        "Pygame could not be installed automatically.\n"
+        "Please run: pip install pygame"
+    )
+    raise SystemExit
+
+
+from PIL import Image, ImageTk, ImageSequence
+import pygame
 
 
 class FlashcardApp:
@@ -71,7 +103,14 @@ class FlashcardApp:
             "sounds",
             "wrong.mp3"
         )
-        self.background_music_path = os.path.join(
+
+        self.menu_music_path = os.path.join(
+            self.base_folder,
+            "assets",
+            "sounds",
+            "main_menu.mp3"
+        )
+        self.quiz_music_path = os.path.join(
             self.base_folder,
             "assets",
             "sounds",
@@ -89,22 +128,18 @@ class FlashcardApp:
         self.correct_answer = ""
         self.points_per_question = 0.0
 
-        # Background GIF storage
         self.gif_frames = []
         self.gif_index = 0
         self.gif_delay = 100
 
-        # Keep track if music is already playing
-        self.music_playing = False
+        # Track what music is currently active
+        self.current_music = None
 
-        # Initialize audio
         self.init_audio()
 
-        # Background label
         self.bg_label = tk.Label(self.root, bd=0)
         self.bg_label.place(x=0, y=0, relwidth=1, relheight=1)
 
-        # Load and animate GIF
         self.load_background_gif()
         self.animate_background()
 
@@ -114,7 +149,7 @@ class FlashcardApp:
     # AUDIO
     # ==========================================
     def init_audio(self):
-        if self.use_sound and PYGAME_AVAILABLE:
+        if self.use_sound:
             try:
                 pygame.mixer.init()
             except Exception as error:
@@ -122,7 +157,7 @@ class FlashcardApp:
                 self.use_sound = False
 
     def play_correct_sound(self):
-        if not self.use_sound or not PYGAME_AVAILABLE:
+        if not self.use_sound:
             return
         try:
             if os.path.exists(self.correct_sound_path):
@@ -133,7 +168,7 @@ class FlashcardApp:
             print("Error playing correct sound:", error)
 
     def play_wrong_sound(self):
-        if not self.use_sound or not PYGAME_AVAILABLE:
+        if not self.use_sound:
             return
         try:
             if os.path.exists(self.wrong_sound_path):
@@ -143,37 +178,45 @@ class FlashcardApp:
         except Exception as error:
             print("Error playing wrong sound:", error)
 
-    def start_background_music(self):
-        if not self.use_sound or not PYGAME_AVAILABLE:
+    def play_music(self, music_path, music_name):
+        if not self.use_sound:
             return
-        try:
-            if os.path.exists(self.background_music_path):
-                pygame.mixer.music.load(self.background_music_path)
-                pygame.mixer.music.play(-1)
-                self.music_playing = True
-            else:
-                print("Background music not found:", self.background_music_path)
-        except Exception as error:
-            print("Error playing background music:", error)
 
-    def stop_background_music(self):
-        if not self.use_sound or not PYGAME_AVAILABLE:
+        # Prevent reloading the same music again and again
+        if self.current_music == music_name:
+            return
+
+        try:
+            if os.path.exists(music_path):
+                pygame.mixer.music.stop()
+                pygame.mixer.music.load(music_path)
+                pygame.mixer.music.play(-1)
+                self.current_music = music_name
+            else:
+                print(f"{music_name} not found:", music_path)
+        except Exception as error:
+            print(f"Error playing {music_name}:", error)
+
+    def start_menu_music(self):
+        self.play_music(self.menu_music_path, "menu")
+
+    def start_quiz_music(self):
+        self.play_music(self.quiz_music_path, "quiz")
+
+    def stop_music(self):
+        if not self.use_sound:
             return
         try:
             pygame.mixer.music.stop()
-            self.music_playing = False
+            self.current_music = None
         except Exception as error:
-            print("Error stopping background music:", error)
+            print("Error stopping music:", error)
 
     # ==========================================
     # BACKGROUND GIF
     # ==========================================
     def load_background_gif(self):
         if not self.use_background_gif:
-            return
-
-        if not PIL_AVAILABLE:
-            print("Pillow is not installed. GIF background disabled.")
             return
 
         if not os.path.exists(self.background_gif_path):
@@ -256,8 +299,8 @@ class FlashcardApp:
     # MAIN MENU
     # ==========================================
     def show_main_menu(self):
-        self.stop_background_music()
         self.clear_screen()
+        self.start_menu_music()
 
         panel = self.create_panel(760, 560)
 
@@ -382,8 +425,8 @@ class FlashcardApp:
     # MANUAL INPUT
     # ==========================================
     def manual_input_menu(self):
-        self.stop_background_music()
         self.clear_screen()
+        self.start_menu_music()
 
         panel = self.create_panel(820, 610)
 
@@ -494,7 +537,7 @@ class FlashcardApp:
         self.round_flashcards = random.sample(self.flashcards, count)
         self.points_per_question = 100 / len(self.round_flashcards)
 
-        self.start_background_music()
+        self.start_quiz_music()
         self.show_question()
 
     # ==========================================
@@ -589,8 +632,8 @@ class FlashcardApp:
     # FINAL SCORE
     # ==========================================
     def show_final_score(self):
-        self.stop_background_music()
         self.clear_screen()
+        self.start_menu_music()
 
         panel = self.create_panel(760, 420)
 
