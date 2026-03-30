@@ -1,2 +1,0 @@
-
-                color=ft.Colors.BLACK,
